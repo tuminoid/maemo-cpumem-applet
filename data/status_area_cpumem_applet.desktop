@@ -1,0 +1,4 @@
+[Desktop Entry]
+Name=Cpu/Memory Applet for Maemo5 - status area plugin
+Type=default
+X-Path=status_area_cpumem_applet.so

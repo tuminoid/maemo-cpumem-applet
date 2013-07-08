@@ -1,0 +1,6 @@
+TODO:
+ * Apply better graphics with fine-grained visualization of cpu and mem
+ * Add a control-panel app for settings
+ * Store settings in gconf
+
+All these to a separate control panel applet installed separately or not???

@@ -1,0 +1,97 @@
+Source: cpumem-applet
+Section: user/utilities
+Priority: optional
+Maintainer: Tuomo Tanskanen <tumi@tumi.fi>
+Build-Depends: debhelper (>= 4.1.0), libhildon1-dev (>=2.1.29), libosso-dev (>=2.0), osso-af-settings, libhildondesktop1-dev (>=2.1.0)
+Standards-Version: 3.8.0
+
+Package: cpumem-applet
+Section: user/utilities
+Architecture: any
+Depends: ${shlibs:Depends}, libhildon1 (>=2.1.29), libosso1 (>=2.0), libhildondesktop1 (>=2.1.0)
+XB-Maemo-Display-Name: CPU/Memory Load Applet
+XSBC-Bugtracker: https://bugs.maemo.org/buglist.cgi?product=cpumem-applet
+XB-Maemo-Icon-26: 
+ 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
+ RU5ErkJggg==
+ ===
+Description: Show CPU and memory usage in small status-area icon.
+ Displays CPU and memory utilisation in small status-area icon.
+ Left side bars in the icon are CPU usage, right side bars 
+ are memory usage.
+ Stripped down version of Jakub Pavelek's load-applet.
+ 
