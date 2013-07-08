@@ -11,12 +11,13 @@
 #include <glib.h>
 #include <string.h>
 #include <libosso.h>
+typedef unsigned long long uint64_t;
 
 #include "cpumem_status_area_item.h"
 
 #define CPUMEM_ICON_WIDTH  16
 #define CPUMEM_ICON_HEIGHT 16
-#define CPUMEM_BOX_WIDTH   5
+#define CPUMEM_BOX_WIDTH   4
 #define CPUMEM_BOX_HEIGHT  3
 #define CPUMEM_CPU_MAX 5
 
@@ -29,6 +30,9 @@ struct _CpumemAppletStatusAreaItemPrivate {
 	gint lastU, lastN, lastIO, lastI;
 	guchar last_mem_level;
 	guchar last_cpu_level;
+	guchar last_net_level;
+	uint64_t last_in_oct;
+	uint64_t last_out_oct;
 	GdkPixbuf *pixbuf;
 	GdkPixbuf *pixbuf_on;
 	GdkPixbuf *pixbuf_red;
@@ -147,19 +151,75 @@ check_cpu (CpumemAppletStatusAreaItemPrivate *priv)
 		return 1;
 }
 
+static guchar
+check_net (CpumemAppletStatusAreaItemPrivate *priv)
+{
+	#define NETFILE "/proc/net/dev"
+    uint64_t cur_in_oct, cur_out_oct;
+	GError *error;
+	gchar *contents;
+	char *pos;
+	char *token;
+    int next, cnt;
+    uint64_t inoct, outoct;
+    guchar l;
+
+	if (!g_file_get_contents (NETFILE, &contents, NULL, &error)) {
+		fprintf (stderr, "ERR: can't read file %s: %s\n", NETFILE, error->message);
+		g_error_free (error);
+		return 0;
+	}
+	
+	cur_in_oct = cur_out_oct = 0;
+	next = 0;
+	token = strtok_r(contents, ":\n\r ", &pos);
+	while(token != NULL) {
+		if(!strcmp(token, "gprs0") || !strcmp(token, "wlan0")) {
+			cnt = 1;
+			next = 1;
+		} else {
+			if(next == 1) {
+				if(--cnt == 0) {
+					cur_in_oct += strtoull(token, NULL, 10);
+					next = 2;
+					cnt = 8;
+				}
+			} else if(next == 2) {
+				if(--cnt == 0) {
+					cur_out_oct += strtoull(token, NULL, 10);
+					next = 0;
+				}
+
+			}
+		}	
+		token = strtok_r(NULL, ":\n\r ", &pos);
+	}
+	g_free (contents);
+    
+    inoct = cur_in_oct - priv->last_in_oct;
+    outoct = cur_out_oct - priv->last_out_oct;
+    if(inoct < outoct) {l=6; inoct = outoct;} else l=1;
+    if(inoct > 0) l++;
+    if(inoct > 1024) l++;
+    if(inoct > 1024*10) l++;
+    if(inoct > 1024*100) l++;
+    priv->last_in_oct = cur_in_oct;
+    priv->last_out_oct = cur_out_oct;
+    return l;
+}
 
 
 /*
  * Compose and blit the current status of memory bars
  */
 static void
-blit_mem_barsconst guchar level, CpumemAppletStatusAreaItemPrivate *priv)
+blit_mem_bars(const guchar level, CpumemAppletStatusAreaItemPrivate *priv)
 {
 	guint x, y;
 	
 	gdk_pixbuf_fill(priv->pixbuf, 0x00000000);
 
-	x = 9;
+	x = 6;
 	y = 1;
 	if (level > 4)
 		gdk_pixbuf_composite(priv->pixbuf_on, priv->pixbuf, x, y, 
@@ -181,6 +241,36 @@ blit_mem_barsconst guchar level, CpumemAppletStatusAreaItemPrivate *priv)
 			CPUMEM_BOX_WIDTH, CPUMEM_BOX_HEIGHT, x, y, 1, 1, GDK_INTERP_NEAREST, 255);
 }
 
+static void
+blit_net_bars(guchar level, CpumemAppletStatusAreaItemPrivate *priv)
+{
+	guint x, y;
+	GdkPixbuf *color;
+	
+	x = 11;
+	y = 1;
+	if(level > 5) {color = priv->pixbuf_red; level -= 5;}
+	else color = priv->pixbuf_on;
+	if (level > 4)
+		gdk_pixbuf_composite(color, priv->pixbuf, x, y, 
+			CPUMEM_BOX_WIDTH, CPUMEM_BOX_HEIGHT, x, y, 1, 1, GDK_INTERP_NEAREST, 255);
+	y = 5;
+	if (level > 3)
+		gdk_pixbuf_composite(color, priv->pixbuf, x, y, 
+			CPUMEM_BOX_WIDTH, CPUMEM_BOX_HEIGHT, x, y, 1, 1, GDK_INTERP_NEAREST, 255);
+	y = 9;
+	if (level > 2)
+		gdk_pixbuf_composite(color, priv->pixbuf, x, y, 
+			CPUMEM_BOX_WIDTH, CPUMEM_BOX_HEIGHT, x, y, 1, 1, GDK_INTERP_NEAREST, 255);
+	y = 13;
+	if (level > 1)
+		gdk_pixbuf_composite(color, priv->pixbuf, x, y, 
+			CPUMEM_BOX_WIDTH, CPUMEM_BOX_HEIGHT, x, y, 1, 1, GDK_INTERP_NEAREST, 255);
+	else
+		gdk_pixbuf_composite(priv->pixbuf_off, priv->pixbuf, x, y, 
+			CPUMEM_BOX_WIDTH, CPUMEM_BOX_HEIGHT, x, y, 1, 1, GDK_INTERP_NEAREST, 255);
+}
+
 
 /* 
  * Compose and blit current status of CPU bars
@@ -190,7 +280,7 @@ blit_cpu_bars (const guchar level, CpumemAppletStatusAreaItemPrivate *priv)
 {
 	guint x, y;
 	
-	x = 2;
+	x = 1;
 	y = 1;
 	if (level > 4)
 	{
@@ -230,22 +320,27 @@ check_load (gpointer data)
 {
 	guchar current_cpu_level;
 	guchar current_mem_level;
+	guchar current_net_level;
 	CpumemAppletStatusAreaItem *item = (CpumemAppletStatusAreaItem*)data;
 	CpumemAppletStatusAreaItemPrivate *priv = (CpumemAppletStatusAreaItemPrivate*)item->priv;
    
 	current_cpu_level = check_cpu(priv); 
+	current_net_level = check_net(priv); 
 	current_mem_level = check_mem(priv);
 	//g_debug(g_strdup_printf("LOADAPLET - UPDATED CPU %d MEM %d", current_cpu_level, current_mem_level));
 	
 	//Update and blit only if data changed!
-	if ((current_mem_level != priv->last_mem_level) || (current_cpu_level != priv->last_cpu_level)) {
+	if ((current_mem_level != priv->last_mem_level) || (current_cpu_level != priv->last_cpu_level)
+                    || current_net_level != priv->last_net_level) {
 		blit_mem_bars (current_mem_level, priv);
 		blit_cpu_bars (current_cpu_level, priv);
+		blit_net_bars (current_net_level, priv);
 		if (current_cpu_level == CPUMEM_CPU_MAX)
 			priv->red = FALSE;
 		hd_status_plugin_item_set_status_area_icon (HD_STATUS_PLUGIN_ITEM(data), priv->pixbuf);
 		priv->last_mem_level = current_mem_level;
 		priv->last_cpu_level = current_cpu_level;
+		priv->last_net_level = current_net_level;
 	} else if (current_cpu_level == CPUMEM_CPU_MAX) {
 		//Pulsate max CPU load icon also when CPU load stays at max
 		blit_cpu_bars (current_cpu_level, priv);
@@ -275,7 +370,7 @@ cpumem_applet_status_area_item_display_cb(osso_display_state_t state, gpointer u
 		}
     } else {
 		//Suspend the updates - screen is off
-		if (item->priv->timeout_id) != 0) {
+		if (item->priv->timeout_id != 0) {
 			g_source_remove(item->priv->timeout_id);
 			item->priv->timeout_id = 0;
 		}
@@ -339,6 +434,7 @@ cpumem_applet_status_area_item_init (CpumemAppletStatusAreaItem *item)
 	
 	item->priv->last_mem_level = -1;
 	item->priv->last_cpu_level = -1;
+	item->priv->last_net_level = -1;
 	item->priv->timeout_id = -1;
 	item->priv->red = FALSE;
 	item->priv->pixbuf = gdk_pixbuf_new (GDK_COLORSPACE_RGB, TRUE, 8, CPUMEM_ICON_WIDTH, CPUMEM_ICON_HEIGHT);
